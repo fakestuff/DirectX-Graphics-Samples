@@ -41,6 +41,7 @@ RWTexture2D<float4> g_outDebug1 : register(u21);
 RWTexture2D<float4> g_outDebug2 : register(u22);
 
 TextureCube<float4> g_texEnvironmentMap : register(t12);
+Texture2D<float4> g_texUVChecker : register(t13);
 ConstantBuffer<PathtracerConstantBuffer> g_cb : register(b0);
 StructuredBuffer<PrimitiveMaterialBuffer> g_materials : register(t3);
 StructuredBuffer<AlignedHemisphereSample3D> g_sampleSets : register(t4);
@@ -490,14 +491,16 @@ void MyClosestHitShader_RadianceRay(inout PathtracerRayPayload rayPayload, in Bu
 
     if (material.type == MaterialType::AnalyticalCheckerboardTexture)
     {
-        float2 uv = hitPosition.xz / 2;
+        float2 uv = hitPosition.xz * 0.1;
+        uv.x *= -1;
         float2 ddx = 1;
         float2 ddy = 1;
-        float checkers = CheckersTextureBoxFilter(uv, ddx, ddy);
+        /*float checkers = CheckersTextureBoxFilter(uv, ddx, ddy);
         if (length(uv) < 45 && (checkers > 0.5))
         {
             material.Kd = float3(21, 33, 45) / 255;
-        }
+        }*/
+        material.Kd = g_texUVChecker.SampleLevel(LinearWrapSampler, uv, 0).xyz;
     }
 
     rayPayload.AOGBuffer.tHit = RayTCurrent();
@@ -535,7 +538,22 @@ void MyClosestHitShader_ShadowRay(inout ShadowRayPayload rayPayload, in BuiltInT
 [shader("miss")]
 void MyMissShader_RadianceRay(inout PathtracerRayPayload rayPayload)
 {
-    rayPayload.radiance = g_texEnvironmentMap.SampleLevel(LinearWrapSampler, WorldRayDirection(), 0).xyz;
+    float3 skyColor = float3(0.3,0.4,0.76);
+    float3 midColor = float3(0.4,0.4,0.4);
+    float3 groundColor = float3(0.1,0.1,0.2);
+    //rayPayload.radiance = g_texEnvironmentMap.SampleLevel(LinearWrapSampler, WorldRayDirection(), 0).xyz;
+	float3 color = 0.0f;
+    float height = normalize(WorldRayDirection()).y;
+    if (height > 0)
+    {
+    	color = lerp(midColor, skyColor, height);
+    }
+    else
+    {
+	    color = lerp(midColor, groundColor, abs(height));
+    }
+    rayPayload.radiance = color;
+
 }
 
 [shader("miss")]

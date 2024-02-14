@@ -244,6 +244,7 @@ void Scene::LoadPBRTScene()
     PBRTScene pbrtSceneDefinitions[] = {
         {L"Spaceship", "Assets\\spaceship\\scene.pbrt"},
         {L"GroundPlane", "Assets\\groundplane\\scene.pbrt"},
+        //{L"lte-orb-simple-ball", "Assets\\lte-orb\\lte-orb-simple-ball.pbrt" },
 #if !LOAD_ONLY_ONE_PBRT_MESH 
         {L"Car", "Assets\\car\\scene.pbrt"},
         {L"Dragon", "Assets\\dragon\\scene.pbrt"},
@@ -251,6 +252,7 @@ void Scene::LoadPBRTScene()
 
         {L"MirrorQuad", "Assets\\mirrorquad\\scene.pbrt"},
         {L"Quad", "Assets\\quad\\scene.pbrt"},
+        {L"GreenQuad", "Assets\\greenquad\\scene.pbrt" },
 #endif
     };
 
@@ -600,6 +602,7 @@ void Scene::InitializeGeometry()
     copy(m_materials.begin(), m_materials.end(), m_materialBuffer.begin());
 
     LoadDDSTexture(device, commandList, L"Assets\\Textures\\FlowerRoad\\flower_road_8khdri_1kcubemap.BC7.dds", m_cbvSrvUavHeap.get(), &m_environmentMap, D3D12_SRV_DIMENSION_TEXTURECUBE);
+    LoadDDSTexture(device, commandList, L"Assets\\Textures\\UV_checker_Map.dds", m_cbvSrvUavHeap.get(), &m_uvChecker, D3D12_SRV_DIMENSION_TEXTURE2D);
 
     m_materialBuffer.CopyStagingToGpu();
     m_deviceResources->ExecuteCommandList();
@@ -678,15 +681,22 @@ void Scene::InitializeAccelerationStructures()
         XMMATRIX mTransform = mScale * mTranslation * mRotate * mTranslationSceneCenter;
         m_accelerationStructure->AddBottomLevelASInstance(L"Quad", UINT_MAX, mTransform);
     }
+    for (int i = 0; i < NumOpaqueQuads; i++)
+    {
+        float angleToRotateBy = 360.0f * ((2.f * i + 1) / (2.f * NumOpaqueQuads));
+        XMMATRIX mRotate = XMMatrixRotationY(XMConvertToRadians(angleToRotateBy));
+        XMMATRIX mTransform = mScale * mTranslation * mRotate * mTranslationSceneCenter;
+        m_accelerationStructure->AddBottomLevelASInstance(L"GreenQuad", UINT_MAX, mTransform);
+    }
 
-    int NumMirrorQuads = 12;
+    /*int NumMirrorQuads = 12;
     for (int i = 0; i < NumMirrorQuads; i++)
     {
         float angleToRotateBy = 360.0f * ((2.f * i + 1) / (2.f * NumMirrorQuads));
         XMMATRIX mRotate = XMMatrixRotationY(XMConvertToRadians(angleToRotateBy));
         XMMATRIX mTransform = mScale * mTranslation * mRotate * mTranslationSceneCenter;
         m_accelerationStructure->AddBottomLevelASInstance(L"MirrorQuad", UINT_MAX, mTransform);
-    }
+    }*/
 #endif
 
 #if RENDER_GRASS_GEOMETRY

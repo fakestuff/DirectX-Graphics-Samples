@@ -34,6 +34,7 @@ namespace GlobalRootSignature {
             MaterialBuffer,
             SampleBuffers,
             EnvironmentMap,
+            UVCheckerMap,
             GbufferNormalRGB,
             PrevFrameBottomLevelASIstanceTransforms,
             MotionVector,
@@ -213,11 +214,12 @@ void Pathtracer::CreateRootSignatures()
         ranges[Slot::Debug2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 22); 
 
         ranges[Slot::EnvironmentMap].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 12);  // 1 input environment map texture
-
+        ranges[Slot::UVCheckerMap].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 13);
         CD3DX12_ROOT_PARAMETER rootParameters[Slot::Count];
         rootParameters[Slot::Output].InitAsDescriptorTable(1, &ranges[Slot::Output]);
         rootParameters[Slot::GBufferResources].InitAsDescriptorTable(1, &ranges[Slot::GBufferResources]);
         rootParameters[Slot::EnvironmentMap].InitAsDescriptorTable(1, &ranges[Slot::EnvironmentMap]);
+        rootParameters[Slot::UVCheckerMap].InitAsDescriptorTable(1, &ranges[Slot::UVCheckerMap]);
         rootParameters[Slot::GbufferNormalRGB].InitAsDescriptorTable(1, &ranges[Slot::GbufferNormalRGB]);
         rootParameters[Slot::MotionVector].InitAsDescriptorTable(1, &ranges[Slot::MotionVector]);
         rootParameters[Slot::ReprojectedNormalDepth].InitAsDescriptorTable(1, &ranges[Slot::ReprojectedNormalDepth]);
@@ -661,6 +663,7 @@ void Pathtracer::Run(Scene& scene)
 
     auto& MaterialBuffer = scene.MaterialBuffer();
     auto& EnvironmentMap = scene.EnvironmentMap();
+    auto& UVCheckerMap = scene.UVChecker();
     auto& PrevFrameBottomLevelASInstanceTransforms = scene.PrevFrameBottomLevelASInstanceTransforms();
 
     commandList->SetDescriptorHeaps(1, m_cbvSrvUavHeap->GetAddressOf());
@@ -689,6 +692,7 @@ void Pathtracer::Run(Scene& scene)
     commandList->SetComputeRootConstantBufferView(GlobalRootSignature::Slot::ConstantBuffer, m_CB.GpuVirtualAddress(frameIndex));
     commandList->SetComputeRootShaderResourceView(GlobalRootSignature::Slot::MaterialBuffer, scene.MaterialBuffer().GpuVirtualAddress());
     commandList->SetComputeRootDescriptorTable(GlobalRootSignature::Slot::EnvironmentMap, EnvironmentMap.gpuDescriptorHandle);
+    commandList->SetComputeRootDescriptorTable(GlobalRootSignature::Slot::UVCheckerMap, UVCheckerMap.gpuDescriptorHandle);
     commandList->SetComputeRootShaderResourceView(GlobalRootSignature::Slot::PrevFrameBottomLevelASIstanceTransforms, PrevFrameBottomLevelASInstanceTransforms.GpuVirtualAddress(frameIndex));
 
 

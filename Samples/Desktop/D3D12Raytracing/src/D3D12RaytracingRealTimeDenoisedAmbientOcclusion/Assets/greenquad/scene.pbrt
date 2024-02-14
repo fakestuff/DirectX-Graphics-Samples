@@ -7,7 +7,7 @@ Film "image" "integer xresolution" [ 1280 ] "integer yresolution" [ 720 ] "strin
 Camera "perspective" "float fov" [ 20.114292 ] 
 WorldBegin
 	Transform [ 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1]
-	MakeNamedMaterial "GroundPlane" "string type" [ "matte"  ] "rgb Kd" [ 0.70740 0.070740 0.070740 ]
+	MakeNamedMaterial "GroundPlane" "string type" [ "matte"  ] "rgb Kd" [ 0.0740 0.70740 0.070740 ]
 	NamedMaterial "GroundPlane" 
 	Shape "trianglemesh" "integer indices" [ 1 0 2 1 2 3 ] "point P" [ -1 0 0 1 0 0 -1 1 0 1 1 0 ] "normal N" [ 0 0 -1 0 0 -1 0 0 -1 0 0 -1 ] "float uv" [ 0 0 1 0 0 1 1 1 ]
 WorldEnd

@@ -49,6 +49,7 @@ public:
     // Getters & setters.
     GpuResource(&GrassPatchVB())[UIParameters::NumGrassGeometryLODs][2] { return m_grassPatchVB; }
     D3DTexture& EnvironmentMap() { return m_environmentMap; }
+    D3DTexture& UVChecker() { return m_uvChecker; }
     StructuredBuffer<PrimitiveMaterialBuffer>& MaterialBuffer() { return m_materialBuffer; }
     StructuredBuffer<XMFLOAT3X4>& PrevFrameBottomLevelASInstanceTransforms() { return m_prevFrameBottomLevelASInstanceTransforms; }
     
@@ -119,6 +120,7 @@ private:
     StructuredBuffer<PrimitiveMaterialBuffer> m_materialBuffer;
     D3DTexture m_environmentMap;
     D3DTexture m_nullTexture;
+    D3DTexture m_uvChecker;
 
     XMVECTOR m_lightPosition;
     XMFLOAT3 m_lightColor;
