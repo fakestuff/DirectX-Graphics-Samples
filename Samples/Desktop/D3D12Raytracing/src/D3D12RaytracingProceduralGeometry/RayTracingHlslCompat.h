@@ -119,6 +119,7 @@ namespace RayType {
     enum Enum {
         Radiance = 0,   // ~ Primary, reflected camera/view rays calculating color for each hit.
         Shadow,         // ~ Shadow/visibility rays, only testing for occlusion
+        Indirect,       // ~ Rays for indirect lighting
         Count
     };
 }
@@ -130,7 +131,8 @@ namespace TraceRayParameters
         static const UINT Offset[RayType::Count] =
         {
             0, // Radiance ray
-            1  // Shadow ray
+            1, // Shadow ray
+            2, // Indirect ray
         };
         static const UINT GeometryStride = RayType::Count;
     }
@@ -138,7 +140,8 @@ namespace TraceRayParameters
         static const UINT Offset[RayType::Count] =
         {
             0, // Radiance ray
-            1  // Shadow ray
+            1, // Shadow ray
+            2, // Indirect ray
         };
     }
 }
@@ -147,7 +150,7 @@ namespace TraceRayParameters
 static const XMFLOAT4 ChromiumReflectance = XMFLOAT4(0.549f, 0.556f, 0.554f, 1.0f);
 
 static const XMFLOAT4 BackgroundColor = XMFLOAT4(0.8f, 0.9f, 1.0f, 1.0f);
-static const float InShadowRadiance = 0.35f;
+static const float InShadowRadiance = 0.0f;
 
 namespace AnalyticPrimitive {
     enum Enum {

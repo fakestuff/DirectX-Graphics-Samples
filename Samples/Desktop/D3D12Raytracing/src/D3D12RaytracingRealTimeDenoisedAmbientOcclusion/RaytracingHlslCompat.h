@@ -105,6 +105,16 @@ struct PathtracerRayPayload
     AmbientOcclusionGBuffer AOGBuffer;
 };
 
+struct PTRayPayload
+{
+    UINT rayRecursionDepth;
+    float tHit;
+    XMFLOAT3 radiance;              // TODO encode
+    XMFLOAT3 passThrough;
+    XMFLOAT3 hitNormal;
+    XMFLOAT3 hitAlbedo;             // only for debug
+};
+
 struct ShadowRayPayload
 {
     float tHit;         // Hit time <0,..> on Hit. -1 on miss.
@@ -199,7 +209,9 @@ struct PathtracerConstantBuffer
     XMMATRIX projectionToWorldWithCameraAtOrigin;
     XMFLOAT3 cameraPosition;
     BOOL     useBaseAlbedoFromMaterial;
-    XMFLOAT3 lightPosition;     
+    BOOL     mainLightIsDirectional;
+    XMFLOAT3 lightPosition;
+    XMFLOAT3 lightDirection;
     BOOL     useNormalMaps;
     XMFLOAT3 lightColor;
     float    defaultAmbientIntensity;
@@ -207,7 +219,7 @@ struct PathtracerConstantBuffer
     XMMATRIX prevFrameViewProj;
     XMMATRIX prevFrameProjToViewCameraAtOrigin;
     XMFLOAT3 prevFrameCameraPosition;
-    float    padding;
+    UINT    ptFrameID; //path tracing frame ID, reset when camera is moved
 
 	float Znear;
 	float Zfar;
@@ -489,6 +501,7 @@ namespace PathtracerRayType {
     enum Enum {
         Radiance = 0,	// ~ Radiance ray generating color and GBuffer data
         Shadow,         // ~ Shadow/visibility rays
+        PathTracing,
         Count
     };
 }
@@ -509,6 +522,7 @@ namespace TraceRayParameters
         {
             0, // Radiance ray
             1, // Shadow ray
+            2,
         };
 		static const UINT GeometryStride = PathtracerRayType::Count;
     }
@@ -517,6 +531,7 @@ namespace TraceRayParameters
         {
             0, // Radiance ray
             1, // Shadow ray
+            2,
         };
     }
 }

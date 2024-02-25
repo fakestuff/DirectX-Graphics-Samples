@@ -46,6 +46,13 @@ void CameraController::SetBoundaries(const XMVECTOR& _min, XMVECTOR& _max)
 	m_boundaryMax = _max;
 }
 
+bool ISXMVectorEqual(const XMVECTOR& lhs, const XMVECTOR& rhs)
+{
+    return lhs.m128_f32[0] == rhs.m128_f32[0] &&
+        lhs.m128_f32[1] == rhs.m128_f32[1] &&
+        lhs.m128_f32[2] == rhs.m128_f32[2] &&
+        lhs.m128_f32[3] == rhs.m128_f32[3];
+}
 // Returns true if camera was modified.
 bool CameraController::Update(float deltaTime)
 {
@@ -124,6 +131,11 @@ bool CameraController::Update(float deltaTime)
         OutputDebugStringW(wstr.str().c_str());
 #endif
 	}
+    
+    bool cameraMoved = !ISXMVectorEqual(m_camera.Eye(), prevCameraState.Eye()) ||
+    	               !ISXMVectorEqual(m_camera.At(), prevCameraState.At()) ||
+                       !ISXMVectorEqual(m_camera.Up(), prevCameraState.Up());
+    m_cameraMoved = cameraMoved;
 
     return memcmp(&prevCameraState, &m_camera, sizeof(m_camera)) != 0;
 }

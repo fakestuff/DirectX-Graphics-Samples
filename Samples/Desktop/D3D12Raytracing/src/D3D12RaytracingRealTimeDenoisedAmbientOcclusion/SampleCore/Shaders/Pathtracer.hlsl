@@ -39,6 +39,7 @@ RWTexture2D<float4> g_rtColor : register(u19);
 RWTexture2D<float4> g_rtAOSurfaceAlbedo : register(u20);
 RWTexture2D<float4> g_outDebug1 : register(u21);
 RWTexture2D<float4> g_outDebug2 : register(u22);
+RWTexture2D<float4> g_rtAccumulator : register(u23);
 
 TextureCube<float4> g_texEnvironmentMap : register(t12);
 Texture2D<float4> g_texUVChecker : register(t13);
@@ -64,6 +65,24 @@ Texture2D<float3> l_texNormalMap : register(t4, space1);
 
 // Delayed include to resolve resource references
 #include "MotionVector.hlsli"
+
+float3 SampleGradient3SkyColor(float3 rayDir)
+{
+	float3 skyColor = float3(0.3,0.4,0.76);
+    float3 midColor = float3(0.4,0.4,0.4);
+    float3 groundColor = float3(0.1,0.1,0.2);
+	float3 color = 0.0f;
+    float height = normalize(rayDir).y;
+    if (height > 0)
+    {
+    	color = lerp(midColor, skyColor, height);
+    }
+    else
+    {
+	    color = lerp(midColor, groundColor, abs(height));
+    }
+    return color;
+}
 
 // Trace a shadow ray and return true if it hits any geometry.
 bool TraceShadowRayAndReportIfHit(out float tHit, in Ray ray, in UINT currentRayRecursionDepth, in bool retrieveTHit = true, in float TMax = 10000)
@@ -148,7 +167,9 @@ PathtracerRayPayload TraceRadianceRay(in Ray ray, in UINT currentRayRecursionDep
 
     if (currentRayRecursionDepth >= g_cb.maxRadianceRayRecursionDepth)
     {
-        rayPayload.radiance = float3(133, 161, 179) / 255.0;
+        // Sample Sky Light
+        //rayPayload.radiance = float3(133, 161, 179) / 255.0;
+        rayPayload.radiance = SampleGradient3SkyColor(ray.direction);
         return rayPayload;
     }
 
@@ -167,6 +188,46 @@ PathtracerRayPayload TraceRadianceRay(in Ray ray, in UINT currentRayRecursionDep
 		TraceRayParameters::HitGroup::Offset[PathtracerRayType::Radiance],
 		TraceRayParameters::HitGroup::GeometryStride,
 		TraceRayParameters::MissShader::Offset[PathtracerRayType::Radiance],
+		rayDesc, rayPayload);
+
+	return rayPayload;
+}
+
+PTRayPayload TracePathTracingRay(in Ray ray, in UINT currentRayRecursionDepth, float tMin = NEAR_PLANE, float tMax = FAR_PLANE, float bounceContribution = 1, bool cullNonOpaque = false)
+{
+    PTRayPayload rayPayload;
+    rayPayload.rayRecursionDepth = currentRayRecursionDepth + 1;
+    rayPayload.radiance = float3(0,0,0);
+    rayPayload.passThrough = float3(1,1,1);
+    /*rayPayload.AOGBuffer.tHit = HitDistanceOnMiss;
+    rayPayload.AOGBuffer.hitPosition = 0;
+    rayPayload.AOGBuffer.diffuseByte3 = 0;
+    rayPayload.AOGBuffer.encodedNormal = 0;
+    rayPayload.AOGBuffer._virtualHitPosition = 0;
+    rayPayload.AOGBuffer._encodedNormal = 0; */
+
+    if (currentRayRecursionDepth >= g_cb.maxRadianceRayRecursionDepth)
+    {
+        // Sample Sky Light
+        // TODO shoot a shadow ray to avoid light leak
+        //rayPayload.radiance = float3(133, 161, 179) / 255.0;
+        return rayPayload;
+    }
+
+    // Set the ray's extents.
+    RayDesc rayDesc;
+    rayDesc.Origin = ray.origin;
+    rayDesc.Direction = ray.direction;
+    rayDesc.TMin = tMin;
+    rayDesc.TMax = tMax;
+
+    UINT rayFlags = (cullNonOpaque ? RAY_FLAG_CULL_NON_OPAQUE : 0); 
+	TraceRay(g_scene,
+        rayFlags,
+		TraceRayParameters::InstanceMask,
+		TraceRayParameters::HitGroup::Offset[PathtracerRayType::PathTracing],
+		TraceRayParameters::HitGroup::GeometryStride,
+		TraceRayParameters::MissShader::Offset[PathtracerRayType::PathTracing],
 		rayDesc, rayPayload);
 
 	return rayPayload;
@@ -262,6 +323,18 @@ void UpdateAOGBufferOnLargerDiffuseComponent(inout PathtracerRayPayload rayPaylo
     }
 }
 
+float3 TraceIndirectLight(in float3 N, in float3 objectNormal, in float3 samplePosition, in PrimitiveMaterialBuffer)
+{
+	const int IndirectRayCount = 64;
+    // for each ray
+    // random ray direction
+    // theta angle, and cos(beta) [0,1]
+    // convert to unit dir
+    // shoot ray
+    // accumulate
+    return float3(0,0,0);
+}
+
 float3 Shade(
     inout PathtracerRayPayload rayPayload,
     in float3 N,
@@ -284,7 +357,15 @@ float3 Shade(
     rayPayload.AOGBuffer.diffuseByte3 = NormalizedFloat3ToByte3(Kd);
     if (!BxDF::IsBlack(material.Kd) || !BxDF::IsBlack(material.Ks))
     {
-        float3 wi = normalize(g_cb.lightPosition.xyz - hitPosition);
+        float3 wi;
+        if (g_cb.mainLightIsDirectional)
+        {
+	        wi = g_cb.lightDirection;
+        }
+        else
+        {
+	        wi = normalize(g_cb.lightPosition.xyz - hitPosition);
+        }
 
         // Raytraced shadows.
         bool isInShadow = TraceShadowRayAndReportIfHit(hitPosition, wi, N, rayPayload);
@@ -306,6 +387,8 @@ float3 Shade(
     // This will be subtracted for hitPositions with 
     // calculated Ambient coefficient in the composition pass.
     L += g_cb.defaultAmbientIntensity * Kd;
+
+    // TODO add fake diffuse ambient here
 
     // Specular Indirect Illumination
     bool isReflective = !BxDF::IsBlack(Kr);
@@ -415,6 +498,75 @@ void MyRayGenShader_RadianceRay()
     g_rtColor[DTid] = float4(rayPayload.radiance, 1);
 }
 
+[shader("raygeneration")]
+void MyRayGenShader_PathTracingRay()
+{
+    uint2 DTid = DispatchRaysIndex().xy;
+
+	// Generate a ray for a camera pixel corresponding to an index from the dispatched 2D grid.
+	Ray ray = GenerateCameraRay(DTid, g_cb.cameraPosition, g_cb.projectionToWorldWithCameraAtOrigin);
+
+	// Cast a ray into the scene and retrieve GBuffer information.
+	UINT currentRayRecursionDepth = 0;
+    PTRayPayload rayPayload = TracePathTracingRay(ray, currentRayRecursionDepth);
+
+    // Invalidate perfect mirror reflections that missed. 
+    // There is no We don't need to calculate AO for those.
+    //bool hasNonZeroDiffuse = rayPayload.diffuseByte3 != 0;
+    //rayPayload.AOGBuffer.tHit = hasNonZeroDiffuse ? rayPayload.AOGBuffer.tHit : HitDistanceOnMiss;
+    bool hasCameraRayHitGeometry = rayPayload.tHit != HitDistanceOnMiss;
+
+	// Write out GBuffer information to rendertargets.
+    g_rtGBufferPosition[DTid] = float4(0,0,0,0);// float4(rayPayload.AOGBuffer.hitPosition, 1);
+
+    float rayLength = HitDistanceOnMiss;
+    if (hasCameraRayHitGeometry)
+    {
+        rayLength = rayPayload.tHit;
+    
+        // Calculate the motion vector.
+        float _depth;
+        //float2 motionVector = CalculateMotionVector(rayPayload.AOGBuffer._virtualHitPosition, _depth, DTid);
+        //g_rtTextureSpaceMotionVector[DTid] = motionVector;
+        //g_rtReprojectedNormalDepth[DTid] = EncodeNormalDepth(DecodeNormal(rayPayload.AOGBuffer._encodedNormal), _depth);
+        
+        // Calculate linear z-depth
+        float3 cameraDirection = GenerateForwardCameraRayDirection(g_cb.projectionToWorldWithCameraAtOrigin);
+        float linearDepth = rayLength * dot(ray.direction, cameraDirection);
+
+        //g_rtGBufferNormalDepth[DTid] = EncodeNormalDepth(DecodeNormal(rayPayload.AOGBuffer.encodedNormal), linearDepth);
+        g_rtGBufferDepth[DTid] = linearDepth;
+
+        //g_rtAOSurfaceAlbedo[DTid] = float4(Byte3ToNormalizedFloat3(rayPayload.AOGBuffer.diffuseByte3), 0);
+    }
+    else // No geometry hit.
+    {
+        g_rtGBufferNormalDepth[DTid] = 0;
+        g_rtGBufferDepth[DTid] = 0;
+        g_rtAOSurfaceAlbedo[DTid] = 0;
+
+        // Invalidate the motion vector - set it to move well out of texture bounds.
+        g_rtTextureSpaceMotionVector[DTid] = 1e3f;
+        g_rtReprojectedNormalDepth[DTid] = 0;
+    }
+    // add frame id debugger ui later
+    float3 finalColor = rayPayload.radiance * rayPayload.passThrough;
+    if (g_cb.ptFrameID == 0) // first frame
+    {
+	    g_rtColor[DTid] = float4(finalColor, 1); // may need tone mapping, check later
+		g_rtAccumulator[DTid] = float4(finalColor, 1);
+    }
+    else
+    {
+        float4 historyColor = g_rtAccumulator[DTid];
+        //float3 blendColor = finalColor * 0.03 + historyColor.xyz * 0.97;
+	    g_rtColor[DTid] = float4(float3(finalColor + historyColor.xyz) / float(g_cb.ptFrameID+1), 1); // may need tone mapping, check later
+		g_rtAccumulator[DTid] += float4(finalColor, 0);
+    }
+    
+    
+}
+
 float3 NormalMap(
     in float3 normal,
     in float2 texCoord,
@@ -443,6 +595,53 @@ float3 NormalMap(
     float3 bumpNormal = normalize(texSample * 2.f - 1.f);
     return BumpMapNormalToWorldSpaceNormal(bumpNormal, normal, tangent);
 }
+
+// OK maybe I should restart here
+[shader("closesthit")]
+void MyClosestHitShader_PathTracingRay(inout PTRayPayload rayPayload, in BuiltInTriangleIntersectionAttributes attr)
+{
+	uint startIndex = PrimitiveIndex() * 3;
+    const uint3 indices = { l_indices[startIndex], l_indices[startIndex + 1], l_indices[startIndex + 2] };
+
+    // Retrieve vertices for the hit triangle.
+    VertexPositionNormalTextureTangent vertices[3] = {
+        l_vertices[indices[0]],
+        l_vertices[indices[1]],
+        l_vertices[indices[2]] };
+
+    float2 vertexTexCoords[3] = { vertices[0].textureCoordinate, vertices[1].textureCoordinate, vertices[2].textureCoordinate };
+    float2 texCoord = HitAttribute(vertexTexCoords, attr);
+
+
+    UINT materialID = l_materialCB.materialID;
+    PrimitiveMaterialBuffer material = g_materials[materialID];
+
+    // Load triangle normal.
+    float3 normal;
+    float3 objectNormal;
+    {
+        // Retrieve corresponding vertex normals for the triangle vertices.
+        float3 vertexNormals[3] = { vertices[0].normal, vertices[1].normal, vertices[2].normal };
+        objectNormal = normalize(HitAttribute(vertexNormals, attr));
+
+        float orientation = HitKind() == HIT_KIND_TRIANGLE_FRONT_FACE ? 1 : -1;
+        objectNormal *= orientation;
+
+        // BLAS Transforms in this sample are uniformly scaled so it's OK to directly apply the BLAS transform.
+        normal = normalize(mul((float3x3)ObjectToWorld3x4(), objectNormal));
+    }
+    float3 hitPosition = HitWorldPosition();
+
+    if (g_cb.useNormalMaps && material.hasNormalTexture)
+    {
+        normal = NormalMap(normal, texCoord, vertices, material, attr);
+    }
+    float3 reflectDir = normalize(reflect(WorldRayDirection(), normal));
+	Ray reflectionRay = { HitWorldPosition() + reflectDir * 0.0001f, reflectDir };
+    rayPayload = TracePathTracingRay(reflectionRay, rayPayload.rayRecursionDepth);
+    rayPayload.passThrough *= clamp(dot(normal, -WorldRayDirection()) , 0, 1);
+}
+
 
 [shader("closesthit")]
 void MyClosestHitShader_RadianceRay(inout PathtracerRayPayload rayPayload, in BuiltInTriangleIntersectionAttributes attr)
@@ -531,6 +730,7 @@ void MyClosestHitShader_ShadowRay(inout ShadowRayPayload rayPayload, in BuiltInT
     rayPayload.tHit = RayTCurrent();
 }
 
+
 //***************************************************************************
 //**********************------ Miss shaders -------**************************
 //***************************************************************************
@@ -538,22 +738,8 @@ void MyClosestHitShader_ShadowRay(inout ShadowRayPayload rayPayload, in BuiltInT
 [shader("miss")]
 void MyMissShader_RadianceRay(inout PathtracerRayPayload rayPayload)
 {
-    float3 skyColor = float3(0.3,0.4,0.76);
-    float3 midColor = float3(0.4,0.4,0.4);
-    float3 groundColor = float3(0.1,0.1,0.2);
     //rayPayload.radiance = g_texEnvironmentMap.SampleLevel(LinearWrapSampler, WorldRayDirection(), 0).xyz;
-	float3 color = 0.0f;
-    float height = normalize(WorldRayDirection()).y;
-    if (height > 0)
-    {
-    	color = lerp(midColor, skyColor, height);
-    }
-    else
-    {
-	    color = lerp(midColor, groundColor, abs(height));
-    }
-    rayPayload.radiance = color;
-
+    rayPayload.radiance = SampleGradient3SkyColor(WorldRayDirection());
 }
 
 [shader("miss")]
@@ -562,4 +748,10 @@ void MyMissShader_ShadowRay(inout ShadowRayPayload rayPayload)
     rayPayload.tHit = HitDistanceOnMiss;
 }
 
+[shader("miss")]
+void MyMissShader_PathTracingRay(inout PTRayPayload rayPayload)
+{
+    rayPayload.radiance = float3(1.0, 1.0, 1.0);
+    return;
+}
 #endif // PATHTRACER_HLSL

@@ -24,6 +24,7 @@ namespace GameCore
         void SlowRotation(bool enable) { m_FineRotation = enable; }
         void EnableMomentum(bool enable) { m_Momentum = enable; }
 		void SetBoundaries(const DirectX::XMVECTOR& _min, DirectX::XMVECTOR& _max);
+        bool IsCameraMoved() { return m_cameraMoved; }
 
     private:
         CameraController& operator=(const CameraController&) {return *this;}
@@ -41,6 +42,7 @@ namespace GameCore
         bool m_FineMovement;
         bool m_FineRotation;
         bool m_Momentum;
+        bool m_cameraMoved;
 
         float m_LastYaw;
         float m_LastPitch;

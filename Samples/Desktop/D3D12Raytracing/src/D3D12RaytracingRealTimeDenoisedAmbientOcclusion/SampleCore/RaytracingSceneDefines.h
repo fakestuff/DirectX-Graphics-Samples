@@ -64,6 +64,7 @@ namespace GBufferResource {
         ReprojectedNormalDepth,
         Color,
         AOSurfaceAlbedo,
+		AccumulateRT,
 		Count
 	};
 }

@@ -98,6 +98,7 @@ private:
     UINT                                m_currentGrassPatchVBIndex = 0;
     UINT                                m_grassInstanceShaderRecordOffsets[2];
     UINT                                m_prevFrameLODs[NumGrassPatchesX * NumGrassPatchesZ];
+    int                                 m_ptFrameId;
 
     std::map<std::wstring, BottomLevelAccelerationStructureGeometry> m_bottomLevelASGeometries;
     std::unique_ptr<RaytracingAccelerationStructureManager> m_accelerationStructure;
@@ -122,7 +123,9 @@ private:
     D3DTexture m_nullTexture;
     D3DTexture m_uvChecker;
 
+    bool mainLightIsDirectional;
     XMVECTOR m_lightPosition;
+    XMVECTOR m_lightDirection;
     XMFLOAT3 m_lightColor;
 
     friend class D3D12RaytracingRealTimeDenoisedAmbientOcclusion;

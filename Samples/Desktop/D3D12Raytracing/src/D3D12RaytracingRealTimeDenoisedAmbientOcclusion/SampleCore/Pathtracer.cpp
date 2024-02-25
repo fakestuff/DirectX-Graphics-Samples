@@ -43,6 +43,7 @@ namespace GlobalRootSignature {
             AOSurfaceAlbedo,
             Debug1,
             Debug2,
+            AccumulateRT,
             Count
         };
     }
@@ -76,12 +77,13 @@ namespace LocalRootSignature {
 }
 
 // Shader entry points.
-const wchar_t* Pathtracer::c_rayGenShaderNames[] = { L"MyRayGenShader_RadianceRay" };
-const wchar_t* Pathtracer::c_closestHitShaderNames[] = { L"MyClosestHitShader_RadianceRay", L"MyClosestHitShader_ShadowRay" };
-const wchar_t* Pathtracer::c_missShaderNames[] = { L"MyMissShader_RadianceRay", L"MyMissShader_ShadowRay" };
+//const wchar_t* Pathtracer::c_rayGenShaderNames[] = { L"MyRayGenShader_RadianceRay" };
+const wchar_t* Pathtracer::c_rayGenShaderNames[] = { L"MyRayGenShader_PathTracingRay" };
+const wchar_t* Pathtracer::c_closestHitShaderNames[] = { L"MyClosestHitShader_RadianceRay", L"MyClosestHitShader_ShadowRay", L"MyClosestHitShader_PathTracingRay" };
+const wchar_t* Pathtracer::c_missShaderNames[] = { L"MyMissShader_RadianceRay", L"MyMissShader_ShadowRay", L"MyMissShader_PathTracingRay" };
 
 // Hit groups.
-const wchar_t* Pathtracer::c_hitGroupNames[] = { L"MyHitGroup_Triangle_RadianceRay", L"MyHitGroup_Triangle_ShadowRay" };
+const wchar_t* Pathtracer::c_hitGroupNames[] = { L"MyHitGroup_Triangle_RadianceRay", L"MyHitGroup_Triangle_ShadowRay", L"MyHitGroup_Triangle_PathTracing" };
 
 // Singleton instance.
 Pathtracer* g_pPathracer = nullptr;
@@ -211,7 +213,8 @@ void Pathtracer::CreateRootSignatures()
         ranges[Slot::Color].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 19);  // 1 output texture shaded color
         ranges[Slot::AOSurfaceAlbedo].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 20);  // 1 output texture AO diffuse
         ranges[Slot::Debug1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 21); 
-        ranges[Slot::Debug2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 22); 
+        ranges[Slot::Debug2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 22);
+        ranges[Slot::AccumulateRT].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 23);
 
         ranges[Slot::EnvironmentMap].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 12);  // 1 input environment map texture
         ranges[Slot::UVCheckerMap].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 13);
@@ -227,6 +230,7 @@ void Pathtracer::CreateRootSignatures()
         rootParameters[Slot::AOSurfaceAlbedo].InitAsDescriptorTable(1, &ranges[Slot::AOSurfaceAlbedo]);
         rootParameters[Slot::Debug1].InitAsDescriptorTable(1, &ranges[Slot::Debug1]);
         rootParameters[Slot::Debug2].InitAsDescriptorTable(1, &ranges[Slot::Debug2]);
+        rootParameters[Slot::AccumulateRT].InitAsDescriptorTable(1, &ranges[Slot::AccumulateRT]);
 
         rootParameters[Slot::AccelerationStructure].InitAsShaderResourceView(0);
         rootParameters[Slot::ConstantBuffer].InitAsConstantBufferView(0);
@@ -614,6 +618,9 @@ void Pathtracer::SetCamera(const GameCore::Camera& camera)
 void Pathtracer::UpdateConstantBuffer(Scene& scene)
 {
     XMStoreFloat3(&m_CB->lightPosition, scene.m_lightPosition);
+    m_CB->mainLightIsDirectional = scene.mainLightIsDirectional;
+    m_CB->ptFrameID = scene.m_ptFrameId;
+    XMStoreFloat3(&m_CB->lightDirection, scene.m_lightDirection);
     m_CB->lightColor = scene.m_lightColor;
 
     SetCamera(scene.Camera());
@@ -684,6 +691,7 @@ void Pathtracer::Run(Scene& scene)
         resourceStateTracker->TransitionResource(&m_GBufferResources[GBufferResource::ReprojectedNormalDepth], D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         resourceStateTracker->TransitionResource(&m_GBufferResources[GBufferResource::Color], D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         resourceStateTracker->TransitionResource(&m_GBufferResources[GBufferResource::AOSurfaceAlbedo], D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        resourceStateTracker->TransitionResource(&m_GBufferResources[GBufferResource::AccumulateRT], D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     }
 
 
@@ -702,12 +710,14 @@ void Pathtracer::Run(Scene& scene)
     commandList->SetComputeRootDescriptorTable(GlobalRootSignature::Slot::ReprojectedNormalDepth, m_GBufferResources[GBufferResource::ReprojectedNormalDepth].gpuDescriptorWriteAccess);
     commandList->SetComputeRootDescriptorTable(GlobalRootSignature::Slot::Color, m_GBufferResources[GBufferResource::Color].gpuDescriptorWriteAccess);
     commandList->SetComputeRootDescriptorTable(GlobalRootSignature::Slot::AOSurfaceAlbedo, m_GBufferResources[GBufferResource::AOSurfaceAlbedo].gpuDescriptorWriteAccess);
+    commandList->SetComputeRootDescriptorTable(GlobalRootSignature::Slot::AccumulateRT, m_GBufferResources[GBufferResource::AccumulateRT].gpuDescriptorWriteAccess);
 
     GpuResource* debugResources = Sample::g_debugOutput;
     commandList->SetComputeRootDescriptorTable(GlobalRootSignature::Slot::Debug1, debugResources[0].gpuDescriptorWriteAccess);
     commandList->SetComputeRootDescriptorTable(GlobalRootSignature::Slot::Debug2, debugResources[1].gpuDescriptorWriteAccess); 
 	
     // Dispatch Rays.
+    // Add Indirect ray
     DispatchRays(m_rayGenShaderTables[RayGenShaderType::Pathtracer].Get());
 
     // Transition GBuffer resources to shader resource state.
@@ -719,6 +729,7 @@ void Pathtracer::Run(Scene& scene)
         resourceStateTracker->TransitionResource(&m_GBufferResources[GBufferResource::ReprojectedNormalDepth], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         resourceStateTracker->TransitionResource(&m_GBufferResources[GBufferResource::Color], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         resourceStateTracker->TransitionResource(&m_GBufferResources[GBufferResource::AOSurfaceAlbedo], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        resourceStateTracker->TransitionResource(&m_GBufferResources[GBufferResource::AccumulateRT], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     }
 
     // Calculate partial derivatives.
@@ -783,6 +794,7 @@ void Pathtracer::CreateTextureResources()
         CreateRenderTargetResource(device, COMPACT_NORMAL_DEPTH_DXGI_FORMAT, m_raytracingWidth, m_raytracingHeight, m_cbvSrvUavHeap.get(), &m_GBufferResources[GBufferResource::ReprojectedNormalDepth], initialResourceState, L"GBuffer Reprojected Hit Position");
         CreateRenderTargetResource(device, backbufferFormat, m_raytracingWidth, m_raytracingHeight, m_cbvSrvUavHeap.get(), &m_GBufferResources[GBufferResource::Color], initialResourceState, L"GBuffer Color");
         CreateRenderTargetResource(device, DXGI_FORMAT_R11G11B10_FLOAT, m_raytracingWidth, m_raytracingHeight, m_cbvSrvUavHeap.get(), &m_GBufferResources[GBufferResource::AOSurfaceAlbedo], initialResourceState, L"GBuffer AO Surface Albedo");
+        CreateRenderTargetResource(device, DXGI_FORMAT_R32G32B32A32_FLOAT, m_raytracingWidth, m_raytracingHeight, m_cbvSrvUavHeap.get(), &m_GBufferResources[GBufferResource::AccumulateRT], initialResourceState, L"Accumulate Color");
     }
 
     // Low-res GBuffer resources.

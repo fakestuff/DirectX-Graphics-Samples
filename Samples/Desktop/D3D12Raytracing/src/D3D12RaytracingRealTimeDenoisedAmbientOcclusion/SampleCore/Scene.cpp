@@ -167,6 +167,12 @@ void Scene::OnUpdate()
     {
         m_cameraController->Update(elapsedTime);
     }
+    if (m_cameraController->IsCameraMoved())
+    {
+        m_ptFrameId = -1;
+    }
+    m_ptFrameId += 1;// init to -1, so first frame will be 0
+
     if (Scene_Args::AnimateScene)
     {
         float animationDuration = 180.0f;
@@ -405,6 +411,8 @@ void Scene::InitializeScene()
         XMFLOAT4 yellow = XMFLOAT4(1.0f, 1.0f, 0.5f, 1.0f);
     }
 
+    m_ptFrameId = -1;
+
     // Setup camera.
     {
         auto& camera = SampleScene::args[SampleScene::Type::Main].camera;
@@ -417,7 +425,10 @@ void Scene::InitializeScene()
 
     // Setup lights.
     {
-        m_lightPosition = XMVectorSet(-20.0f, 60.0f, 20.0f, 0);
+        mainLightIsDirectional = true;
+        float sqrt3 = sqrt(1.0f/3);
+        m_lightDirection = XMVectorSet(sqrt3, sqrt3, sqrt3, 0);
+    	m_lightPosition = XMVectorSet(-20.0f, 60.0f, 20.0f, 0);
         m_lightColor = XMFLOAT3(0.6f, 0.6f, 0.6f);
     }
 }
