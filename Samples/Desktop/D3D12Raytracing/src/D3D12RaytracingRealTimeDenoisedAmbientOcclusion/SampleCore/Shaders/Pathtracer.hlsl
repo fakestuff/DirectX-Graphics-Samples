@@ -66,6 +66,191 @@ Texture2D<float3> l_texNormalMap : register(t4, space1);
 // Delayed include to resolve resource references
 #include "MotionVector.hlsli"
 
+#define TWO_PI (3.141592653 * 2)
+#define ONE_OVER_PI ( 1.0f / 3.141592653)
+#define FLT_MAX 3.402823466e+38F
+
+// Switches between two RNGs
+#define USE_PCG 1
+
+// Conversion between linear and sRGB color spaces
+inline float linearToSrgb(float linearColor)
+{
+	if (linearColor < 0.0031308f) return linearColor * 12.92f;
+	else return 1.055f * float(pow(linearColor, 1.0f / 2.4f)) - 0.055f;
+}
+
+float3 linearToSrgb(float3 linearColor)
+{
+	return float3(linearToSrgb(linearColor.x), linearToSrgb(linearColor.y),linearToSrgb(linearColor.z));
+}
+
+inline float srgbToLinear(float srgbColor)
+{
+	if (srgbColor < 0.04045f) return srgbColor / 12.92f;
+	else return float(pow((srgbColor + 0.055f) / 1.055f, 2.4f));
+}
+
+ // -------------------------------------------------------------------------
+ //    RNG
+ // -------------------------------------------------------------------------
+
+#if USE_PCG
+	#define RngStateType uint4
+#else
+	#define RngStateType uint
+#endif
+
+// PCG random numbers generator
+// Source: "Hash Functions for GPU Rendering" by Jarzynski & Olano
+uint4 pcg4d(uint4 v)
+{
+	v = v * 1664525u + 1013904223u;
+
+	v.x += v.y * v.w; 
+	v.y += v.z * v.x; 
+	v.z += v.x * v.y; 
+	v.w += v.y * v.z;
+
+	v = v ^ (v >> 16u);
+
+	v.x += v.y * v.w; 
+	v.y += v.z * v.x; 
+	v.z += v.x * v.y; 
+	v.w += v.y * v.z;
+
+	return v;
+}
+
+// 32-bit Xorshift random number generator
+uint xorshift(inout uint rngState)
+{
+	rngState ^= rngState << 13;
+	rngState ^= rngState >> 17;
+	rngState ^= rngState << 5;
+	return rngState;
+}
+
+// Jenkins's "one at a time" hash function
+uint jenkinsHash(uint x) {
+	x += x << 10;
+	x ^= x >> 6;
+	x += x << 3;
+	x ^= x >> 11;
+	x += x << 15;
+	return x;
+}
+
+// Converts unsigned integer into float int range <0; 1) by using 23 most significant bits for mantissa
+float uintToFloat(uint x) {
+	return asfloat(0x3f800000 | (x >> 9)) - 1.0f;
+}
+
+#if USE_PCG
+
+// Initialize RNG for given pixel, and frame number (PCG version)
+RngStateType initRNG(uint2 pixelCoords, uint2 resolution, uint frameNumber) {
+	return RngStateType(pixelCoords.xy, frameNumber, 0); //< Seed for PCG uses a sequential sample number in 4th channel, which increments on every RNG call and starts from 0
+}
+
+// Return random float in <0; 1) range  (PCG version)
+float rand(inout RngStateType rngState) {
+	rngState.w++; //< Increment sample index
+	return uintToFloat(pcg4d(rngState).x);
+}
+
+#else
+
+// Initialize RNG for given pixel, and frame number (Xorshift-based version)
+RngStateType initRNG(uint2 pixelCoords, uint2 resolution, uint frameNumber) {
+	RngStateType seed = dot(pixelCoords, uint2(1, resolution.x)) ^ jenkinsHash(frameNumber);
+	return jenkinsHash(seed);
+}
+
+// Return random float in <0; 1) range (Xorshift-based version)
+float rand(inout RngStateType rngState) {
+	return uintToFloat(xorshift(rngState));
+}
+
+#endif
+
+// Maps integers to colors using the hash function (generates pseudo-random colors)
+float3 hashAndColor(int i) {
+	uint hash = jenkinsHash(i);
+	float r = ((hash >> 0) & 0xFF) / 255.0f;
+	float g = ((hash >> 8) & 0xFF) / 255.0f;
+	float b = ((hash >> 16) & 0xFF) / 255.0f;
+	return float3(r, g, b);
+}
+/*******************************************************************************************************/
+
+// Samples a direction within a hemisphere oriented along +Z axis with a cosine-weighted distribution 
+// Source: "Sampling Transformations Zoo" in Ray Tracing Gems by Shirley et al.
+float3 sampleHemisphere(float2 u, out float pdf) {
+
+	float a = sqrt(u.x);
+	float b = TWO_PI * u.y;
+
+	float3 result = float3(
+		a * cos(b),
+		a * sin(b),
+		sqrt(1.0f - u.x));
+
+	pdf = result.z * ONE_OVER_PI;
+
+	return result;
+}
+
+float3 sampleHemisphere(float2 u) {
+	float pdf;
+	return sampleHemisphere(u, pdf);
+}
+
+// For sampling of all our diffuse BRDFs we use cosine-weighted hemisphere sampling, with PDF equal to (NdotL/PI)
+float diffusePdf(float NdotL) {
+	return NdotL * ONE_OVER_PI;
+}
+
+
+/*******************************************************************************************************/
+// -------------------------------------------------------------------------
+//    Quaternion rotations
+// -------------------------------------------------------------------------
+
+// Calculates rotation quaternion from input vector to the vector (0, 0, 1)
+// Input vector must be normalized!
+float4 getRotationToZAxis(float3 input) {
+
+	// Handle special case when input is exact or near opposite of (0, 0, 1)
+	if (input.z < -0.99999f) return float4(1.0f, 0.0f, 0.0f, 0.0f);
+
+	return normalize(float4(input.y, -input.x, 0.0f, 1.0f + input.z));
+}
+
+// Calculates rotation quaternion from vector (0, 0, 1) to the input vector
+// Input vector must be normalized!
+float4 getRotationFromZAxis(float3 input) {
+
+	// Handle special case when input is exact or near opposite of (0, 0, 1)
+	if (input.z < -0.99999f) return float4(1.0f, 0.0f, 0.0f, 0.0f);
+
+	return normalize(float4(-input.y, input.x, 0.0f, 1.0f + input.z));
+}
+
+// Returns the quaternion with inverted rotation
+float4 invertRotation(float4 q)
+{
+	return float4(-q.x, -q.y, -q.z, q.w);
+}
+
+// Optimized point rotation using quaternion
+// Source: https://gamedev.stackexchange.com/questions/28395/rotating-vector3-by-a-quaternion
+float3 rotatePoint(float4 q, float3 v) {
+	const float3 qAxis = float3(q.x, q.y, q.z);
+	return 2.0f * dot(qAxis, v) * qAxis + (q.w * q.w - dot(qAxis, qAxis)) * v + 2.0f * q.w * cross(qAxis, v);
+}
+
+/*******************************************************************************************************/
 float3 SampleGradient3SkyColor(float3 rayDir)
 {
 	float3 skyColor = float3(0.3,0.4,0.76);
@@ -196,9 +381,9 @@ PathtracerRayPayload TraceRadianceRay(in Ray ray, in UINT currentRayRecursionDep
 PTRayPayload TracePathTracingRay(in Ray ray, in UINT currentRayRecursionDepth, float tMin = NEAR_PLANE, float tMax = FAR_PLANE, float bounceContribution = 1, bool cullNonOpaque = false)
 {
     PTRayPayload rayPayload;
-    rayPayload.rayRecursionDepth = currentRayRecursionDepth + 1;
-    rayPayload.radiance = float3(0,0,0);
-    rayPayload.passThrough = float3(1,1,1);
+    //rayPayload.rayRecursionDepth = currentRayRecursionDepth + 1;
+    //rayPayload.radiance = float3(0,0,0);
+    //rayPayload.passThrough = float3(1,1,1);
     /*rayPayload.AOGBuffer.tHit = HitDistanceOnMiss;
     rayPayload.AOGBuffer.hitPosition = 0;
     rayPayload.AOGBuffer.diffuseByte3 = 0;
@@ -498,18 +683,75 @@ void MyRayGenShader_RadianceRay()
     g_rtColor[DTid] = float4(rayPayload.radiance, 1);
 }
 
+
 [shader("raygeneration")]
 void MyRayGenShader_PathTracingRay()
 {
     uint2 DTid = DispatchRaysIndex().xy;
+    // Initialize random numbers generator
+	RngStateType rngState = initRNG(DispatchRaysIndex().xy, DispatchRaysDimensions().xy, g_cb.ptFrameID);
 
 	// Generate a ray for a camera pixel corresponding to an index from the dispatched 2D grid.
-	Ray ray = GenerateCameraRay(DTid, g_cb.cameraPosition, g_cb.projectionToWorldWithCameraAtOrigin);
+    float2 offset = float2(rand(rngState), rand(rngState)) - 0.5f;
+	Ray ray = GenerateCameraRay(DTid, g_cb.cameraPosition, g_cb.projectionToWorldWithCameraAtOrigin, offset);
+    //Ray ray = GenerateCameraRay(DTid, g_cb.cameraPosition, g_cb.projectionToWorldWithCameraAtOrigin);
+	uint2 LaunchIndex = DispatchRaysIndex().xy;
+	uint2 LaunchDimensions = DispatchRaysDimensions().xy;
 
-	// Cast a ray into the scene and retrieve GBuffer information.
+		// Cast a ray into the scene and retrieve GBuffer information.
 	UINT currentRayRecursionDepth = 0;
-    PTRayPayload rayPayload = TracePathTracingRay(ray, currentRayRecursionDepth);
+    //PTRayPayload rayPayload = TracePathTracingRay(ray, currentRayRecursionDepth);
+    const int maxRecursionDepth = g_cb.maxRadianceRayRecursionDepth;
 
+    RayDesc rayDesc;
+    rayDesc.Origin = ray.origin;
+    rayDesc.Direction = ray.direction;
+    rayDesc.TMin = NEAR_PLANE;
+    rayDesc.TMax = FAR_PLANE;
+    float3 radiance = float3(0,0,0);
+    float3 passTrough = float3(1,1,1);
+    UINT rayFlags = 0;//(cullNonOpaque ? RAY_FLAG_CULL_NON_OPAQUE : 0);
+    PTRayPayload rayPayload;
+    for (int bounce = 0; bounce < maxRecursionDepth; bounce++)
+    {
+        TraceRay(g_scene,
+        rayFlags,
+		TraceRayParameters::InstanceMask,
+		TraceRayParameters::HitGroup::Offset[PathtracerRayType::PathTracing],
+		TraceRayParameters::HitGroup::GeometryStride,
+		TraceRayParameters::MissShader::Offset[PathtracerRayType::PathTracing],
+		rayDesc, rayPayload);
+
+	    if (rayPayload.tHit == HitDistanceOnMiss)
+	    {
+		    // ok we hit the sky, terminate
+            float3 skyLight = float3(1, 1, 1);// SampleGradient3SkyColor(rayDesc.Direction);
+            radiance += skyLight * passTrough;
+            break;
+	    }
+        float3 hitPosition = rayPayload.hitPosition;//rayDesc.origin + rayDesc.Direction * rayPayload.tHit;
+        float3 hitNormal = rayPayload.hitNormal;
+
+        passTrough *= clamp( dot(-rayDesc.Direction, hitNormal),0, 1);// / 3.1415926f;
+        if (dot(passTrough, float3(1,1,1)) <= 0.00001)
+        {
+	        break;
+        }
+
+    	float3 reflectDir = normalize(reflect(rayDesc.Direction, hitNormal));
+        float2 u = float2(rand(rngState), rand(rngState));
+        float3 rayDirectionLocal = sampleHemisphere(u);
+        float3 sampleDirLocal;
+        // Transform view direction into local space of our sampling routines 
+		// (local space is oriented so that its positive Z axis points along the shading normal)
+		float4 qRotationToZ = getRotationToZAxis(hitNormal);
+		float3 Vlocal = rotatePoint(qRotationToZ, -rayDesc.Direction);
+		const float3 Nlocal = float3(0.0f, 0.0f, 1.0f);
+        // fully diffuse
+        reflectDir = normalize(rotatePoint(invertRotation(qRotationToZ), rayDirectionLocal));
+        rayDesc.Origin = hitPosition + reflectDir * 0.0001f;
+		rayDesc.Direction = reflectDir;
+    }
     // Invalidate perfect mirror reflections that missed. 
     // There is no We don't need to calculate AO for those.
     //bool hasNonZeroDiffuse = rayPayload.diffuseByte3 != 0;
@@ -550,17 +792,17 @@ void MyRayGenShader_PathTracingRay()
         g_rtReprojectedNormalDepth[DTid] = 0;
     }
     // add frame id debugger ui later
-    float3 finalColor = rayPayload.radiance * rayPayload.passThrough;
+    float3 finalColor = radiance;
     if (g_cb.ptFrameID == 0) // first frame
     {
-	    g_rtColor[DTid] = float4(finalColor, 1); // may need tone mapping, check later
+	    g_rtColor[DTid] = float4(linearToSrgb(finalColor), 1); // may need tone mapping, check later
 		g_rtAccumulator[DTid] = float4(finalColor, 1);
     }
     else
     {
         float4 historyColor = g_rtAccumulator[DTid];
         //float3 blendColor = finalColor * 0.03 + historyColor.xyz * 0.97;
-	    g_rtColor[DTid] = float4(float3(finalColor + historyColor.xyz) / float(g_cb.ptFrameID+1), 1); // may need tone mapping, check later
+	    g_rtColor[DTid] = float4(linearToSrgb(float3(finalColor + historyColor.xyz) / float(g_cb.ptFrameID+1)), 1); // may need tone mapping, check later
 		g_rtAccumulator[DTid] += float4(finalColor, 0);
     }
     
@@ -636,10 +878,14 @@ void MyClosestHitShader_PathTracingRay(inout PTRayPayload rayPayload, in BuiltIn
     {
         normal = NormalMap(normal, texCoord, vertices, material, attr);
     }
-    float3 reflectDir = normalize(reflect(WorldRayDirection(), normal));
-	Ray reflectionRay = { HitWorldPosition() + reflectDir * 0.0001f, reflectDir };
-    rayPayload = TracePathTracingRay(reflectionRay, rayPayload.rayRecursionDepth);
-    rayPayload.passThrough *= clamp(dot(normal, -WorldRayDirection()) , 0, 1);
+    //float3 reflectDir = normalize(reflect(WorldRayDirection(), normal));
+	//Ray reflectionRay = { HitWorldPosition() + reflectDir * 0.0001f, reflectDir };
+    //rayPayload = TracePathTracingRay(reflectionRay, rayPayload.rayRecursionDepth);
+    //rayPayload.passThrough *= clamp(dot(normal, -WorldRayDirection()) , 0, 1); // maybe we do not store passthrough anymore
+    rayPayload.tHit = RayTCurrent();
+    rayPayload.hitNormal = normal;
+    rayPayload.hitPosition = HitWorldPosition();
+
 }
 
 
@@ -751,7 +997,7 @@ void MyMissShader_ShadowRay(inout ShadowRayPayload rayPayload)
 [shader("miss")]
 void MyMissShader_PathTracingRay(inout PTRayPayload rayPayload)
 {
-    rayPayload.radiance = float3(1.0, 1.0, 1.0);
-    return;
+    //rayPayload.radiance = float3(1.0, 1.0, 1.0);
+    rayPayload.tHit= HitDistanceOnMiss;
 }
 #endif // PATHTRACER_HLSL

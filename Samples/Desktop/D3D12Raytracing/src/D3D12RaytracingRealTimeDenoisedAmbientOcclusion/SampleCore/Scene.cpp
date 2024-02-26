@@ -183,7 +183,7 @@ void Scene::OnUpdate()
 
 #if !LOAD_ONLY_ONE_PBRT_MESH
         // Animated car.
-        {
+        /*{
             float radius = 64;
             XMMATRIX mTranslationSceneCenter = XMMatrixTranslation(-7, 0, 7);
             XMMATRIX mTranslation = XMMatrixTranslation(0, 0, radius);
@@ -197,7 +197,7 @@ void Scene::OnUpdate()
             XMMATRIX mTransform = mScale * mRotateSceneCenter * mTranslation * mRotate * mTranslationSceneCenter;
 
             m_accelerationStructure->GetBottomLevelASInstance(m_animatedCarInstanceIndex).SetTransform(mTransform);
-        }
+        }*/
 #endif
     }
 

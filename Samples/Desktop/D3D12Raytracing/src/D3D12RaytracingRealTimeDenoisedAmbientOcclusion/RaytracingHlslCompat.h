@@ -107,12 +107,14 @@ struct PathtracerRayPayload
 
 struct PTRayPayload
 {
-    UINT rayRecursionDepth;
+    //UINT rayRecursionDepth;
     float tHit;
-    XMFLOAT3 radiance;              // TODO encode
-    XMFLOAT3 passThrough;
+    //XMFLOAT3 radiance;              // TODO encode
+    //XMFLOAT3 passThrough;
+    XMFLOAT3 hitPosition;           // TODO try use tHit to encode
     XMFLOAT3 hitNormal;
     XMFLOAT3 hitAlbedo;             // only for debug
+    // other material properties
 };
 
 struct ShadowRayPayload
