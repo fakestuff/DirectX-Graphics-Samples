@@ -40,7 +40,7 @@ float4 RenderPBRResult(in uint2 DTid)
     DecodeNormalDepth(g_texGBufferNormalDepth[DTid], surfaceNormal, depth);
 
     float3 PBRcolor = g_texColor[DTid].xyz;
-
+    return float4(PBRcolor,1.0f);
     float ambientCoef = 0;
     bool hit = depth != HitDistanceOnMiss;
     if (hit && cb.isAOEnabled)

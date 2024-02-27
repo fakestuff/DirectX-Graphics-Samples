@@ -259,6 +259,7 @@ void Scene::LoadPBRTScene()
         {L"MirrorQuad", "Assets\\mirrorquad\\scene.pbrt"},
         {L"Quad", "Assets\\quad\\scene.pbrt"},
         {L"GreenQuad", "Assets\\greenquad\\scene.pbrt" },
+        {L"WhiteQuad", "Assets\\whitequad\\scene.pbrt" },
 #endif
     };
 
@@ -684,7 +685,9 @@ void Scene::InitializeAccelerationStructures()
     XMMATRIX mTranslationSceneCenter = XMMatrixTranslation(-7, 0, 7);
     XMMATRIX mTranslation = XMMatrixTranslation(0, -1.5, radius);
     XMMATRIX mScale = XMMatrixScaling(10, 20, 1);
+    XMMATRIX mTranslationReflector = XMMatrixTranslation(0, -1.5, radius*1.1f);
     int NumOpaqueQuads = 12;
+    int NumWhiteReflectionQuads = 24;
     for (int i = 0; i < NumOpaqueQuads; i++)
     {
         float angleToRotateBy = 360.0f * (2.f * i / (2.f * NumOpaqueQuads));
@@ -692,6 +695,14 @@ void Scene::InitializeAccelerationStructures()
         XMMATRIX mTransform = mScale * mTranslation * mRotate * mTranslationSceneCenter;
         m_accelerationStructure->AddBottomLevelASInstance(L"Quad", UINT_MAX, mTransform);
     }
+    for (int i = 0; i < NumWhiteReflectionQuads; i++)
+    {
+        float angleToRotateBy = 360.0f * ((2.f * i + 1) / (2.f * NumWhiteReflectionQuads));
+        XMMATRIX mRotate = XMMatrixRotationY(XMConvertToRadians(angleToRotateBy));
+        XMMATRIX mTransform = mScale * mTranslationReflector * mRotate * mTranslationSceneCenter;
+        m_accelerationStructure->AddBottomLevelASInstance(L"WhiteQuad", UINT_MAX, mTransform);
+    }
+
     for (int i = 0; i < NumOpaqueQuads; i++)
     {
         float angleToRotateBy = 360.0f * ((2.f * i + 1) / (2.f * NumOpaqueQuads));

@@ -253,8 +253,8 @@ float3 rotatePoint(float4 q, float3 v) {
 /*******************************************************************************************************/
 float3 SampleGradient3SkyColor(float3 rayDir)
 {
-	float3 skyColor = float3(0.3,0.4,0.76);
-    float3 midColor = float3(0.4,0.4,0.4);
+	float3 skyColor = float3(0.5,0.5,0.86);
+    float3 midColor = float3(0.5,0.5,0.5);
     float3 groundColor = float3(0.1,0.1,0.2);
 	float3 color = 0.0f;
     float height = normalize(rayDir).y;
@@ -695,8 +695,8 @@ void MyRayGenShader_PathTracingRay()
     float2 offset = float2(rand(rngState), rand(rngState)) - 0.5f;
 	Ray ray = GenerateCameraRay(DTid, g_cb.cameraPosition, g_cb.projectionToWorldWithCameraAtOrigin, offset);
     //Ray ray = GenerateCameraRay(DTid, g_cb.cameraPosition, g_cb.projectionToWorldWithCameraAtOrigin);
-	uint2 LaunchIndex = DispatchRaysIndex().xy;
-	uint2 LaunchDimensions = DispatchRaysDimensions().xy;
+	// uint2 LaunchIndex = DispatchRaysIndex().xy;
+	// uint2 LaunchDimensions = DispatchRaysDimensions().xy;
 
 		// Cast a ray into the scene and retrieve GBuffer information.
 	UINT currentRayRecursionDepth = 0;
@@ -712,6 +712,8 @@ void MyRayGenShader_PathTracingRay()
     float3 passTrough = float3(1,1,1);
     UINT rayFlags = 0;//(cullNonOpaque ? RAY_FLAG_CULL_NON_OPAQUE : 0);
     PTRayPayload rayPayload;
+    PTRayPayload gbufferPayload;
+    gbufferPayload.tHit = HitDistanceOnMiss;
     for (int bounce = 0; bounce < maxRecursionDepth; bounce++)
     {
         TraceRay(g_scene,
@@ -721,18 +723,22 @@ void MyRayGenShader_PathTracingRay()
 		TraceRayParameters::HitGroup::GeometryStride,
 		TraceRayParameters::MissShader::Offset[PathtracerRayType::PathTracing],
 		rayDesc, rayPayload);
-
+        if (bounce == 0)
+        {
+	        gbufferPayload = rayPayload;
+        }
 	    if (rayPayload.tHit == HitDistanceOnMiss)
 	    {
 		    // ok we hit the sky, terminate
-            float3 skyLight = float3(1, 1, 1);// SampleGradient3SkyColor(rayDesc.Direction);
+            float3 skyLight = float3(1, 1, 1);// SampleGradient3SkyColor(rayDesc.Direction);//
             radiance += skyLight * passTrough;
             break;
 	    }
+        
         float3 hitPosition = rayPayload.hitPosition;//rayDesc.origin + rayDesc.Direction * rayPayload.tHit;
         float3 hitNormal = rayPayload.hitNormal;
 
-        passTrough *= clamp( dot(-rayDesc.Direction, hitNormal),0, 1);// / 3.1415926f;
+        passTrough *= clamp( dot(-rayDesc.Direction, hitNormal),0, 1) * rayPayload.hitAlbedo;// / 3.1415926f;
         if (dot(passTrough, float3(1,1,1)) <= 0.00001)
         {
 	        break;
@@ -756,30 +762,31 @@ void MyRayGenShader_PathTracingRay()
     // There is no We don't need to calculate AO for those.
     //bool hasNonZeroDiffuse = rayPayload.diffuseByte3 != 0;
     //rayPayload.AOGBuffer.tHit = hasNonZeroDiffuse ? rayPayload.AOGBuffer.tHit : HitDistanceOnMiss;
-    bool hasCameraRayHitGeometry = rayPayload.tHit != HitDistanceOnMiss;
+    bool hasCameraRayHitGeometry = gbufferPayload.tHit != HitDistanceOnMiss;
 
 	// Write out GBuffer information to rendertargets.
-    g_rtGBufferPosition[DTid] = float4(0,0,0,0);// float4(rayPayload.AOGBuffer.hitPosition, 1);
+    g_rtGBufferPosition[DTid] = float4(gbufferPayload.hitPosition, 1);
 
     float rayLength = HitDistanceOnMiss;
     if (hasCameraRayHitGeometry)
     {
-        rayLength = rayPayload.tHit;
+        rayLength = gbufferPayload.tHit;
     
         // Calculate the motion vector.
         float _depth;
         //float2 motionVector = CalculateMotionVector(rayPayload.AOGBuffer._virtualHitPosition, _depth, DTid);
         //g_rtTextureSpaceMotionVector[DTid] = motionVector;
         //g_rtReprojectedNormalDepth[DTid] = EncodeNormalDepth(DecodeNormal(rayPayload.AOGBuffer._encodedNormal), _depth);
-        
+        g_rtTextureSpaceMotionVector[DTid] = 1e3f;
+        g_rtReprojectedNormalDepth[DTid] = 0;
         // Calculate linear z-depth
         float3 cameraDirection = GenerateForwardCameraRayDirection(g_cb.projectionToWorldWithCameraAtOrigin);
         float linearDepth = rayLength * dot(ray.direction, cameraDirection);
 
-        //g_rtGBufferNormalDepth[DTid] = EncodeNormalDepth(DecodeNormal(rayPayload.AOGBuffer.encodedNormal), linearDepth);
+        g_rtGBufferNormalDepth[DTid] = EncodeNormalDepth(gbufferPayload.hitNormal, linearDepth);
         g_rtGBufferDepth[DTid] = linearDepth;
 
-        //g_rtAOSurfaceAlbedo[DTid] = float4(Byte3ToNormalizedFloat3(rayPayload.AOGBuffer.diffuseByte3), 0);
+        g_rtAOSurfaceAlbedo[DTid] = float4(gbufferPayload.hitAlbedo, 0);
     }
     else // No geometry hit.
     {
@@ -873,10 +880,34 @@ void MyClosestHitShader_PathTracingRay(inout PTRayPayload rayPayload, in BuiltIn
         normal = normalize(mul((float3x3)ObjectToWorld3x4(), objectNormal));
     }
     float3 hitPosition = HitWorldPosition();
-
+    float3 hitAlbedo = float3(1,1,1);
     if (g_cb.useNormalMaps && material.hasNormalTexture)
     {
         normal = NormalMap(normal, texCoord, vertices, material, attr);
+    }
+
+    if (material.hasDiffuseTexture && !g_cb.useBaseAlbedoFromMaterial)
+    {
+        float3 texSample = l_texDiffuse.SampleLevel(LinearWrapSampler, texCoord, 0).xyz;
+        hitAlbedo = texSample;
+    }
+    else
+    {
+	    hitAlbedo = material.Kd;
+    }
+
+    if (material.type == MaterialType::AnalyticalCheckerboardTexture)
+    {
+        float2 uv = hitPosition.xz * 0.1;
+        uv.x *= -1;
+        float2 ddx = 1;
+        float2 ddy = 1;
+        /*float checkers = CheckersTextureBoxFilter(uv, ddx, ddy);
+        if (length(uv) < 45 && (checkers > 0.5))
+        {
+            material.Kd = float3(21, 33, 45) / 255;
+        }*/
+        hitAlbedo = float3(1,1,1);//g_texUVChecker.SampleLevel(LinearWrapSampler, uv, 0).xyz;
     }
     //float3 reflectDir = normalize(reflect(WorldRayDirection(), normal));
 	//Ray reflectionRay = { HitWorldPosition() + reflectDir * 0.0001f, reflectDir };
@@ -885,6 +916,7 @@ void MyClosestHitShader_PathTracingRay(inout PTRayPayload rayPayload, in BuiltIn
     rayPayload.tHit = RayTCurrent();
     rayPayload.hitNormal = normal;
     rayPayload.hitPosition = HitWorldPosition();
+    rayPayload.hitAlbedo = hitAlbedo;
 
 }
 

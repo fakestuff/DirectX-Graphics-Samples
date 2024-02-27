@@ -517,30 +517,30 @@ void D3D12RaytracingRealTimeDenoisedAmbientOcclusion::OnRender()
         }
 
         // RTAO
-        {
-            ScopedTimer _prof(L"RTAO", commandList);
+        //{
+        //    ScopedTimer _prof(L"RTAO", commandList);
 
-            GpuResource* GBufferResources = m_pathtracer.GBufferResources(RTAO_Args::QuarterResAO);
+        //    GpuResource* GBufferResources = m_pathtracer.GBufferResources(RTAO_Args::QuarterResAO);
 
-            // Raytracing
-            {
-                m_sampleGpuTimes[Sample_GPUTime::AOraytracing].Start(commandList);
-                m_RTAO.Run(
-                    m_scene.AccelerationStructure()->GetTopLevelASResource()->GetGPUVirtualAddress(),
-                    GBufferResources[GBufferResource::HitPosition].gpuDescriptorReadAccess,
-                    GBufferResources[GBufferResource::SurfaceNormalDepth].gpuDescriptorReadAccess,
-                    GBufferResources[GBufferResource::AOSurfaceAlbedo].gpuDescriptorReadAccess);
-                m_sampleGpuTimes[Sample_GPUTime::AOraytracing].Stop(commandList);
-            }
+        //    // Raytracing
+        //    {
+        //        m_sampleGpuTimes[Sample_GPUTime::AOraytracing].Start(commandList);
+        //        m_RTAO.Run(
+        //            m_scene.AccelerationStructure()->GetTopLevelASResource()->GetGPUVirtualAddress(),
+        //            GBufferResources[GBufferResource::HitPosition].gpuDescriptorReadAccess,
+        //            GBufferResources[GBufferResource::SurfaceNormalDepth].gpuDescriptorReadAccess,
+        //            GBufferResources[GBufferResource::AOSurfaceAlbedo].gpuDescriptorReadAccess);
+        //        m_sampleGpuTimes[Sample_GPUTime::AOraytracing].Stop(commandList);
+        //    }
 
-            // Denoising
-            {
-                m_sampleGpuTimes[Sample_GPUTime::AOdenoising].Start(commandList);
-                m_denoiser.Run(m_pathtracer, m_RTAO);
-                m_sampleGpuTimes[Sample_GPUTime::AOdenoising].Stop(commandList);
-            }
-        }
-            
+        //    // Denoising
+        //    {
+        //        m_sampleGpuTimes[Sample_GPUTime::AOdenoising].Start(commandList);
+        //        m_denoiser.Run(m_pathtracer, m_RTAO);
+        //        m_sampleGpuTimes[Sample_GPUTime::AOdenoising].Stop(commandList);
+        //    }
+        //}
+        //    
         // Composition
         m_composition.Render(&m_raytracingOutput, m_scene, m_pathtracer, m_RTAO, m_denoiser, m_width, m_height);
 
